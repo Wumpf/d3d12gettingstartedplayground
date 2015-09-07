@@ -26,3 +26,13 @@
 *.exe
 *.out
 *.app
+
+# Compile folders
+/x64
+/directx12 first steps/x64
+
+# Visual Studio
+/*.sdf
+/*.opensdf
+/.vs
+
