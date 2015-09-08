@@ -8,7 +8,7 @@
 
 #include "Helper.h"
 
-D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0)
+D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 {
 #ifdef D3DDEBUG
 	// Enable the D3D12 debug layer.
@@ -120,7 +120,7 @@ D3D12Device::~D3D12Device()
 
 void D3D12Device::Present()
 {
-	swapChain->Present(1, 0);
+	swapChain->Present(vsync ? 1 : 0, 0);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12Device::GetCurrentBackBufferRTVDesc()

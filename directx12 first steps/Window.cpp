@@ -74,3 +74,8 @@ LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
 	// Handle any messages the switch statement didn't.
 	return DefWindowProc(hWnd, message, wParam, lParam);
 }
+
+void Window::SetCaption(const std::wstring& caption)
+{
+	SetWindowText(windowHandle, caption.c_str());
+}

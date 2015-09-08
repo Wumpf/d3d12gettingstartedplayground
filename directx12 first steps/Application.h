@@ -17,7 +17,7 @@ public:
 	Application();
 	~Application();
 
-	void Update();
+	void Update(float lastFrameTimeInSeconds);
 	void Render();
 
 	void Run();

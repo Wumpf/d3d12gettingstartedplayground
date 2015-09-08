@@ -6,6 +6,7 @@
 #include "Helper.h"
 
 #include <d3dcompiler.h>
+#include <chrono>
 
 Application::Application() :
 	window(new Window(1280, 720, L"testerata!")),
@@ -199,7 +200,7 @@ void Application::PopulateCommandList()
 		CRITICAL_ERROR("Failed to close the command list.");
 }
 
-void Application::Update()
+void Application::Update(float lastFrameTimeInSeconds)
 {
 }
 
@@ -220,12 +221,23 @@ void Application::Render()
 
 void Application::Run()
 {
+	auto messageFunc = std::bind(&Application::OnWindowMessage, this, std::placeholders::_1);
+
 	running = true;
+	float lastFrameTimeInSeconds = 0.0f;
+
 	while (running)
 	{
-		window->ReceiveMessages(std::bind(&Application::OnWindowMessage, this, std::placeholders::_1));
-		Update();
+		auto begin = std::chrono::high_resolution_clock::now(); // should be as good as QueryPerformanceCounter in VS2015
+		
+		window->ReceiveMessages(messageFunc);
+		Update(lastFrameTimeInSeconds);
 		Render();
+
+		auto end = std::chrono::high_resolution_clock::now();
+		long long duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+		lastFrameTimeInSeconds = static_cast<float>(duration / 1000.0 / 1000.0 / 1000.0);
+		window->SetCaption(std::to_wstring(duration / 1000.0 / 1000.0) + L" ms -- " + std::to_wstring(1.0f / lastFrameTimeInSeconds) + L" fps");
 	}
 }
 

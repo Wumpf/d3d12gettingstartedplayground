@@ -45,9 +45,10 @@ private:
 	
 	unsigned int descriptorSize[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
 
-
 	ComPtr<ID3D12Fence> fence;
 	UINT64 fenceValue;
 	HANDLE fenceEvent;
+
+	bool vsync;
 };
 
