@@ -73,16 +73,37 @@ void Application::CreatePSO()
 	UINT compileFlags = 0;
 #endif
 
-	if(FAILED(D3DCompileFromFile(L"shaders.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr)))
+	ID3D10Blob* errorMessages;
+	if (FAILED(D3DCompileFromFile(L"shaders.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, &errorMessages)))
+	{
+		if (errorMessages)
+		{
+			std::cout << static_cast<char*>(errorMessages->GetBufferPointer()) << std::endl;
+			errorMessages->Release();
+		}
+		if (errorMessages)
+			errorMessages->Release();
+
 		CRITICAL_ERROR("Failed to compile vertex shader.");
-	if (FAILED(D3DCompileFromFile(L"shaders.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr)))
+	}
+	if (FAILED(D3DCompileFromFile(L"shaders.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, &errorMessages)))
+	{
+		if (errorMessages)
+		{
+			std::cout << static_cast<char*>(errorMessages->GetBufferPointer()) << std::endl;
+			errorMessages->Release();
+		}
+		if (errorMessages)
+			errorMessages->Release();
+
 		CRITICAL_ERROR("Failed to compile pixel shader.");
+	}
 
 	// Define the vertex input layout.
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
 	// Describe and create the graphics pipeline state object (PSO).
@@ -117,16 +138,16 @@ void Application::CreateVertexBuffer()
 {
 	struct Vertex
 	{
-		float position[3];
+		float position[2];
 		float color[4];
 	};
 
 	// Define the geometry for a triangle.
 	Vertex triangleVertices[] =
 	{
-		{ { 0.0f, 0.25f, 0.0f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
-		{ { 0.25f, -0.25f, 0.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
-		{ { -0.25f, -0.25f, 0.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
+		{ { -0.75f, -0.75f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
+		{ { -1.0f, -1.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
+		{ { -0.5f, -1.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
 	};
 
 	const unsigned int vertexBufferSize = sizeof(triangleVertices);
@@ -191,7 +212,7 @@ void Application::PopulateCommandList()
 	commandList->ClearRenderTargetView(rtvDesc, clearColor, 0, nullptr);
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-	commandList->DrawInstanced(3, 1, 0, 0);
+	commandList->DrawInstanced(3, 100, 0, 0);
 
 	// Indicate that the back buffer will now be used to present.
 	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
