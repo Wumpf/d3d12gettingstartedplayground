@@ -10,14 +10,22 @@
 
 Application::Application() :
 	window(new Window(1280, 720, L"testerata!")),
-	device(new D3D12Device(*window))
+	device(new D3D12Device(*window)),
+	frameQueueIndex(0)
 {
 	CreateRootSignature();
 	CreatePSO();
 	CreateVertexBuffer();
 
+	
+	// Create a command allocator for every inflight-frame
+	for (int i = 0; i < D3D12Device::MAX_FRAMES_INFLIGHT; ++i)
+	{
+		if (FAILED(device->GetD3D12Device()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator[i]))))
+			CRITICAL_ERROR("Failed to create command list allocator.");
+	}
 	// Create the command list.
-	if (FAILED(device->GetD3D12Device()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, device->GetDirectCommandAllocator(), pso.Get(), IID_PPV_ARGS(&commandList))))
+	if (FAILED(device->GetD3D12Device()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator[frameQueueIndex].Get(), pso.Get(), IID_PPV_ARGS(&commandList))))
 		CRITICAL_ERROR("Failed to create command list");
 
 	// Command lists are created in the recording state, but there is nothing
@@ -35,14 +43,11 @@ Application::Application() :
 	scissorRect.top = 0;
 	scissorRect.right = static_cast<LONG>(window->GetWidth());
 	scissorRect.bottom = static_cast<LONG>(window->GetHeight());
-
-	device->WaitForPreviousFrame();
 }
 
 
 Application::~Application()
 {
-	device->WaitForPreviousFrame();
 }
 
 void Application::CreateRootSignature()
@@ -183,18 +188,11 @@ void Application::CreateVertexBuffer()
 
 void Application::PopulateCommandList()
 {
-	// TODO: Learn more about how it is not necessary to reset the allocater every frame.
-
-	// Command list allocators can only be reset when the associated 
-	// command lists have finished execution on the GPU; apps should use 
-	// fences to determine GPU execution progress.
-	if (FAILED(device->GetDirectCommandAllocator()->Reset()))
+	// Should be completely save now to reset this command allocator.
+	if (FAILED(commandAllocator[frameQueueIndex]->Reset()))
 		CRITICAL_ERROR("Failed to reset the command allocator.");
-
-	// However, when ExecuteCommandList() is called on a particular command 
-	// list, that command list can then be reset at any time and must be before 
-	// re-recording.
-	if(FAILED(commandList->Reset(device->GetDirectCommandAllocator(), pso.Get())))
+	// Restart command queue with new command allocator (last frame a different was used)
+	if(FAILED(commandList->Reset(commandAllocator[frameQueueIndex].Get(), pso.Get())))
 		CRITICAL_ERROR("Failed to reset the command list.");
 
 	// Set necessary state.
@@ -203,8 +201,8 @@ void Application::PopulateCommandList()
 	commandList->RSSetScissorRects(1, &scissorRect);
 
 	// Indicate that the back buffer will be used as a render target.
-	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-	auto rtvDesc = device->GetCurrentBackBufferRTVDesc();
+	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentSwapChainBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	auto rtvDesc = device->GetCurrentSwapChainBufferRTVDesc();
 	commandList->OMSetRenderTargets(1, &rtvDesc, FALSE, nullptr);
 
 	// Record commands.
@@ -215,7 +213,7 @@ void Application::PopulateCommandList()
 	commandList->DrawInstanced(3, 100, 0, 0);
 
 	// Indicate that the back buffer will now be used to present.
-	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentSwapChainBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
 	if (FAILED(commandList->Close()))
 		CRITICAL_ERROR("Failed to close the command list.");
@@ -232,12 +230,13 @@ void Application::Render()
 
 	// Execute the command list.
 	ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
-	device->GetRenderQueue()->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+	device->GetDirectCommandQueue()->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	// Present the frame.
 	device->Present();
 
-	device->WaitForPreviousFrame();
+	device->WaitForFreeInflightFrame();
+	frameQueueIndex = (frameQueueIndex + 1) % D3D12Device::MAX_FRAMES_INFLIGHT;
 }
 
 void Application::Run()
@@ -258,7 +257,8 @@ void Application::Run()
 		auto end = std::chrono::high_resolution_clock::now();
 		long long duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
 		lastFrameTimeInSeconds = static_cast<float>(duration / 1000.0 / 1000.0 / 1000.0);
-		window->SetCaption(std::to_wstring(duration / 1000.0 / 1000.0) + L" ms -- " + std::to_wstring(1.0f / lastFrameTimeInSeconds) + L" fps");
+		window->SetCaption(std::to_wstring(device->GetNumFramesInFlight()) + L" frames in-flight --- " + 
+			std::to_wstring(duration / 1000.0 / 1000.0) + L" ms -- " + std::to_wstring(1.0f / lastFrameTimeInSeconds) + L" fps");
 	}
 }
 

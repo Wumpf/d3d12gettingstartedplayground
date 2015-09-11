@@ -8,7 +8,7 @@
 
 #include "Helper.h"
 
-D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
+D3D12Device::D3D12Device(Window& window) : activeSwapChainBufferIndex(0), vsync(false)
 {
 #ifdef D3DDEBUG
 	// Enable the D3D12 debug layer.
@@ -38,10 +38,6 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 			CRITICAL_ERROR("Failed to create D3D12 commandqueue");
 	}
 
-	// Create command allocator.
-	if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator))))
-		CRITICAL_ERROR("Failed to create command list allocator.");
-
 	// Describe and create the swap chain.
 	{
 		ComPtr<IDXGIFactory4> factory;
@@ -49,7 +45,7 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 			CRITICAL_ERROR("Failed to create DXGI factory");
 
 		DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-		swapChainDesc.BufferCount = BACKBUFFERCOUNT;
+		swapChainDesc.BufferCount = SWAPCHAINBUFFERCOUNT;
 		swapChainDesc.BufferDesc.Width = window.GetWidth();
 		swapChainDesc.BufferDesc.Height = window.GetHeight();
 		swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -69,14 +65,14 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 			CRITICAL_ERROR("Failed to create swap chain");
 		}
 
-		gpuFrameIndex = swapChain->GetCurrentBackBufferIndex();
+		activeSwapChainBufferIndex = swapChain->GetCurrentBackBufferIndex();
 	}
 
 	// Create descriptor heap for backbuffer.
 	{
 		// Describe and create a render target view (RTV) descriptor heap.
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-		rtvHeapDesc.NumDescriptors = BACKBUFFERCOUNT;
+		rtvHeapDesc.NumDescriptors = SWAPCHAINBUFFERCOUNT;
 		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 		if(FAILED(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&backbufferDescriptorHeap))))
@@ -88,7 +84,7 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(backbufferDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
 		// Create a RTV for each frame.
-		for (int i = 0; i < BACKBUFFERCOUNT; ++i)
+		for (int i = 0; i < SWAPCHAINBUFFERCOUNT; ++i)
 		{
 			if (FAILED(swapChain->GetBuffer(i, IID_PPV_ARGS(&backbufferRenderTargets[i]))))
 				CRITICAL_ERROR("Failed to retrieve ID3D12Resource from swapchain buffer.");
@@ -100,9 +96,9 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 
 	// Create Fence
 	{
-		if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
-			CRITICAL_ERROR("Failed to create fence!");
-		fenceValue = 1;
+		frameFenceValue = 0;
+		if (FAILED(device->CreateFence(frameFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frameFence))))
+			CRITICAL_ERROR("Failed to create frameFence!");
 
 		// Create an event handle to use for frame synchronization.
 		fenceEvent = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
@@ -115,39 +111,51 @@ D3D12Device::D3D12Device(Window& window) : gpuFrameIndex(0), vsync(false)
 
 D3D12Device::~D3D12Device()
 {
+	WaitForIdleGPU();
 	CloseHandle(fenceEvent);
 }
 
 void D3D12Device::Present()
 {
 	swapChain->Present(vsync ? 1 : 0, 0);
-}
 
-D3D12_CPU_DESCRIPTOR_HANDLE D3D12Device::GetCurrentBackBufferRTVDesc()
-{
-	return CD3DX12_CPU_DESCRIPTOR_HANDLE(backbufferDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), gpuFrameIndex, descriptorSize[D3D12_DESCRIPTOR_HEAP_TYPE_RTV]);
-}
-
-void D3D12Device::WaitForPreviousFrame()
-{
-	// TODO TODO TODO !!!
-	// WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-	// This is code implemented as such for simplicity. More advanced samples 
-	// illustrate how to use fences for efficient resource usage.
-
-	// Signal and increment the fence value.
-	const UINT64 oldFenceValue = fenceValue;
-	if (FAILED(commandQueue->Signal(fence.Get(), oldFenceValue)))
+	// Signal and increment the frameFence value.
+	frameFenceValue++;
+	if (FAILED(commandQueue->Signal(frameFence.Get(), frameFenceValue)))
 		CRITICAL_ERROR("Failed to signal command queue.");
-	fenceValue++;
+}
 
-	// Wait until the previous frame is finished.
-	if (fence->GetCompletedValue() < oldFenceValue)
+unsigned int D3D12Device::GetNumFramesInFlight()
+{
+	return static_cast<unsigned int>(frameFenceValue - frameFence->GetCompletedValue());
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE D3D12Device::GetCurrentSwapChainBufferRTVDesc()
+{
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(backbufferDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), activeSwapChainBufferIndex, descriptorSize[D3D12_DESCRIPTOR_HEAP_TYPE_RTV]);
+}
+
+void D3D12Device::WaitForFreeInflightFrame()
+{
+	if (GetNumFramesInFlight() >= MAX_FRAMES_INFLIGHT)
 	{
-		if (FAILED(fence->SetEventOnCompletion(oldFenceValue, fenceEvent)))
-			CRITICAL_ERROR("Failed to set event for fence completion.");
+		if (FAILED(frameFence->SetEventOnCompletion(frameFenceValue - MAX_FRAMES_INFLIGHT + 1, fenceEvent)))
+			CRITICAL_ERROR("Failed to set event for WaitForFreeInflightFrame.");
 		WaitForSingleObject(fenceEvent, INFINITE);
 	}
 
-	gpuFrameIndex = swapChain->GetCurrentBackBufferIndex();
+	activeSwapChainBufferIndex = swapChain->GetCurrentBackBufferIndex();
+}
+
+void D3D12Device::WaitForIdleGPU()
+{
+	// Wait until all inflight frames are finished.
+	if (frameFence->GetCompletedValue() < frameFenceValue)
+	{
+		if (FAILED(frameFence->SetEventOnCompletion(frameFenceValue, fenceEvent)))
+			CRITICAL_ERROR("Failed to set event for WaitForIdleGPU.");
+		WaitForSingleObject(fenceEvent, INFINITE);
+	}
+
+	activeSwapChainBufferIndex = swapChain->GetCurrentBackBufferIndex();
 }

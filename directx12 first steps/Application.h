@@ -2,11 +2,8 @@
 
 #include <memory>
 #include <Windows.h>
+#include "D3D12Device.h"
 
-#include <d3d12.h>
-#include <wrl/client.h>
-
-using namespace Microsoft::WRL;
 
 class Window;
 class D3D12Device;
@@ -31,8 +28,6 @@ private:
 
 	void OnWindowMessage(MSG message);
 
-
-
 	std::unique_ptr<Window> window;
 	std::unique_ptr<D3D12Device> device;
 
@@ -41,6 +36,9 @@ private:
 
 	ComPtr<ID3D12RootSignature> rootSignature;
 	ComPtr<ID3D12PipelineState> pso;
+
+	unsigned int frameQueueIndex;
+	ComPtr<ID3D12CommandAllocator> commandAllocator[D3D12Device::MAX_FRAMES_INFLIGHT];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
 
 	ComPtr<ID3D12Resource> vertexBuffer;
