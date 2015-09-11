@@ -36,6 +36,7 @@ public:
 
 	ID3D12Device* GetD3D12Device() const					{ return device.Get(); }
 	ID3D12CommandQueue* GetDirectCommandQueue() const		{ return commandQueue.Get(); }
+	unsigned int GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE type) { return descriptorSize[type]; }
 
 	/// Returns the currently targeted swap chain buffer (= "backbuffer")
 	ID3D12Resource* GetCurrentSwapChainBuffer()				{ return backbufferRenderTargets[activeSwapChainBufferIndex].Get(); }

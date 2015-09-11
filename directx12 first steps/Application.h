@@ -23,6 +23,7 @@ private:
 	void CreateRootSignature();
 	void CreatePSO();
 	void CreateVertexBuffer();
+	void CreateTextures();
 
 	void PopulateCommandList();
 
@@ -44,6 +45,9 @@ private:
 	ComPtr<ID3D12Resource> vertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
 
+	static const unsigned int numTextures = 1000;
+	ComPtr<ID3D12Resource> textures[numTextures];
+	ComPtr<ID3D12DescriptorHeap> textureDescriptorHeap;
 
 	bool running;
 };
