@@ -118,11 +118,7 @@ D3D12Device::~D3D12Device()
 void D3D12Device::Present()
 {
 	swapChain->Present(vsync ? 1 : 0, 0);
-
-	// Signal and increment the frameFence value.
-	frameFenceValue++;
-	if (FAILED(commandQueue->Signal(frameFence.Get(), frameFenceValue)))
-		CRITICAL_ERROR("Failed to signal command queue.");
+	SignalFrameFence();
 }
 
 unsigned int D3D12Device::GetNumFramesInFlight()
@@ -133,6 +129,14 @@ unsigned int D3D12Device::GetNumFramesInFlight()
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12Device::GetCurrentSwapChainBufferRTVDesc()
 {
 	return CD3DX12_CPU_DESCRIPTOR_HANDLE(backbufferDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), activeSwapChainBufferIndex, descriptorSize[D3D12_DESCRIPTOR_HEAP_TYPE_RTV]);
+}
+
+void D3D12Device::SignalFrameFence()
+{
+	// Signal and increment the frameFence value.
+	frameFenceValue++;
+	if (FAILED(commandQueue->Signal(frameFence.Get(), frameFenceValue)))
+		CRITICAL_ERROR("Failed to signal command queue.");
 }
 
 void D3D12Device::WaitForFreeInflightFrame()
@@ -149,6 +153,9 @@ void D3D12Device::WaitForFreeInflightFrame()
 
 void D3D12Device::WaitForIdleGPU()
 {
+	// Adds a signal to the frame-fence to ensure that all operations so fare are completed.
+	SignalFrameFence();
+
 	// Wait until all inflight frames are finished.
 	if (frameFence->GetCompletedValue() < frameFenceValue)
 	{

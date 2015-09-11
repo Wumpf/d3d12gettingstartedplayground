@@ -55,6 +55,8 @@ public:
 	static const unsigned int MAX_FRAMES_INFLIGHT = 3; 
 
 private:
+	void SignalFrameFence();
+
 	unsigned int activeSwapChainBufferIndex; ///< The backbuffer/swapchainbuffer index on which the GPU currently works.
 
 	ComPtr<ID3D12Device> device;
@@ -69,7 +71,7 @@ private:
 	unsigned int descriptorSize[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
 
 	ComPtr<ID3D12Fence> frameFence;
-	UINT64 frameFenceValue; ///< Value of the last signal given to the frameFence.
+	UINT64 frameFenceValue; ///< Value of the last signal given to the frameFence. This is not a frame counter since it is also used otherwise!
 	HANDLE fenceEvent;
 
 	bool vsync;

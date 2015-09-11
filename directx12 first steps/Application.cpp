@@ -13,11 +13,6 @@ Application::Application() :
 	device(new D3D12Device(*window)),
 	frameQueueIndex(0)
 {
-	CreateRootSignature();
-	CreatePSO();
-	CreateVertexBuffer();
-
-	
 	// Create a command allocator for every inflight-frame
 	for (int i = 0; i < D3D12Device::MAX_FRAMES_INFLIGHT; ++i)
 	{
@@ -28,17 +23,17 @@ Application::Application() :
 	if (FAILED(device->GetD3D12Device()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator[frameQueueIndex].Get(), pso.Get(), IID_PPV_ARGS(&commandList))))
 		CRITICAL_ERROR("Failed to create command list");
 
-	// Command lists are created in the recording state, but there is nothing
-	// to record yet. The main loop expects it to be closed, so close it now.
-	commandList->Close();
+	CreateRootSignature();
+	CreatePSO();
+	CreateVertexBuffer();
 
+	// Configure viewport and scissor rect.
 	viewport.TopLeftX = 0.0f;
 	viewport.TopLeftY = 0.0f;
 	viewport.Width = static_cast<float>(window->GetWidth());
 	viewport.Height = static_cast<float>(window->GetHeight());
 	viewport.MinDepth = 0.0f;
 	viewport.MaxDepth = 1.0f;
-
 	scissorRect.left = 0;
 	scissorRect.top = 0;
 	scissorRect.right = static_cast<LONG>(window->GetWidth());
@@ -133,7 +128,7 @@ void Application::CreatePSO()
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	psoDesc.SampleDesc.Count = 1;
-	psoDesc.CachedPSO; // TODO: Need to learn about this.
+	psoDesc.CachedPSO;
 	
 	if(FAILED(device->GetD3D12Device()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso))))
 		CRITICAL_ERROR("Failed to PSO.");
@@ -147,38 +142,48 @@ void Application::CreateVertexBuffer()
 		float color[4];
 	};
 
-	// Define the geometry for a triangle.
-	Vertex triangleVertices[] =
+	// Define the geometry for a quad.
+	float screenAspectRatio = static_cast<float>(window->GetWidth()) / window->GetHeight();
+	Vertex quadVertices[] =
 	{
-		{ { -0.75f, -0.75f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
-		{ { -1.0f, -1.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
-		{ { -0.5f, -1.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
+		{ { -0.25f, -0.25f * screenAspectRatio }, { 1.0f, 0.0f, 0.0f, 1.0f } },
+		{ { -0.25f, 0.25f * screenAspectRatio },{ 0.0f, 1.0f, 0.0f, 1.0f } },
+		{ { 0.25f, -0.25f * screenAspectRatio },{ 0.0f, 0.0f, 1.0f, 1.0f } },
+		{ { 0.25f, 0.25f * screenAspectRatio },{ 1.0f, 1.0f, 0.0f, 1.0f } }
 	};
 
-	const unsigned int vertexBufferSize = sizeof(triangleVertices);
+	const unsigned int vertexBufferSize = sizeof(quadVertices);
 
-	// TODO: Do not use upload heap.
-	// Note: using upload heaps to transfer static data like vert buffers is not 
-	// recommended. Every time the GPU needs it, the upload heap will be marshalled 
-	// over. Please read up on Default Heap usage. An upload heap is used here for 
-	// code simplicity and because there are very few verts to actually transfer.
-	if (FAILED(device->GetD3D12Device()->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-			D3D12_HEAP_FLAG_NONE,
-			&CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&vertexBuffer))))
+	// Create an upload heap for the
+	ComPtr<ID3D12Resource> uploadHeap;
+	if (FAILED(device->GetD3D12Device()->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
+																&CD3DX12_RESOURCE_DESC::Buffer(sizeof(quadVertices)), D3D12_RESOURCE_STATE_GENERIC_READ,
+																nullptr, IID_PPV_ARGS(&uploadHeap))))
 	{
-		CRITICAL_ERROR("Failed to create vertex buffer");
+		CRITICAL_ERROR("Failed to create upload heap.");
 	}
 
 	// Copy the triangle data to the vertex buffer.
 	UINT8* pVertexDataBegin;
-	if (FAILED(vertexBuffer->Map(0, nullptr, reinterpret_cast<void**>(&pVertexDataBegin))))
+	if (FAILED(uploadHeap->Map(0, nullptr, reinterpret_cast<void**>(&pVertexDataBegin))))
 		CRITICAL_ERROR("Failed to map vertex buffer");
-	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-	vertexBuffer->Unmap(0, nullptr);
+	memcpy(pVertexDataBegin, quadVertices, sizeof(quadVertices));
+	uploadHeap->Unmap(0, nullptr);
+
+	// Create vertex buffer.
+	if (FAILED(device->GetD3D12Device()->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE,
+																&CD3DX12_RESOURCE_DESC::Buffer(sizeof(quadVertices)), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+																nullptr, IID_PPV_ARGS(&vertexBuffer))))
+	{
+		CRITICAL_ERROR("Failed to create vertex buffer.");
+	}
+
+	// Copy over and wait until its done.
+	commandList->CopyResource(vertexBuffer.Get(), uploadHeap.Get());
+	commandList->Close();
+	ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+	device->GetDirectCommandQueue()->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+	device->WaitForIdleGPU();
 
 	// Initialize the vertex buffer view.
 	vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
@@ -208,9 +213,9 @@ void Application::PopulateCommandList()
 	// Record commands.
 	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	commandList->ClearRenderTargetView(rtvDesc, clearColor, 0, nullptr);
-	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 	commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-	commandList->DrawInstanced(3, 100, 0, 0);
+	commandList->DrawInstanced(4, 1000, 0, 0);
 
 	// Indicate that the back buffer will now be used to present.
 	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(device->GetCurrentSwapChainBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
